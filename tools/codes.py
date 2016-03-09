@@ -2,7 +2,7 @@ import argparse
 import os
 import re
 import csv
-import setup
+import utils
 from typing import List, Mapping
 
 parser = argparse.ArgumentParser(description="Code parser to find the codes of specific securities")
@@ -34,9 +34,9 @@ def get_code(csv_file) -> Mapping[str,str]:
 
 def get_all_codes() -> Mapping[str, str]:
     codes = {}
-    csvfs = filter(lambda f: str(f).endswith(".csv"), os.listdir(setup.res("codes")))
+    csvfs = filter(lambda f: str(f).endswith(".csv"), os.listdir(utils.res("codes")))
     for csvf in csvfs:
-        codes = {**codes, **get_code(setup.res("codes", csvf))}
+        codes = {**codes, **get_code(utils.res("codes", csvf))}
     return codes
 
 
