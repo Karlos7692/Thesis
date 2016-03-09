@@ -1,11 +1,9 @@
 from abc import abstractmethod, ABCMeta
 from datetime import time
 from collections import OrderedDict
-
 """
 Abstract Data Manager classes. To be implemented in each data manager type.
 """
-
 
 # Abstract Data Manager. The default class handling any data.
 class AbstractDataManager(metaclass=ABCMeta):
@@ -34,13 +32,12 @@ class AbstractDataManager(metaclass=ABCMeta):
         return ret
 
     def __setitem__(self, key, value):
-        if key in self.data and self.data[key] != value:
-            raise Exception("Added key {key} exists, expected {expected} but found {value}"
-                            .format(key=key, expected=self.data[key], value=value))
-
-        if key in self.data:
-            return
-
+        # if key in self.data and self.data[key] != value:
+        #     raise Exception("Added key {key} exists, expected {expected} but found {value}"
+        #                     .format(key=key, expected=self.data[key], value=value))
+        #
+        # if key in self.data:
+        #     return
         self.data[key] = value
 
     def __len__(self):
@@ -65,11 +62,6 @@ class AbstractDataManager(metaclass=ABCMeta):
     def reset(self) -> bool:
         self.position = 0
 
-    # TODO Change to slice
-    def filter_values(self, value_range: range):
-        for d, v in self.data:
-            tuple([v[i] for i in value_range])
-
     def first(self):
         if len(self) == 0:
             raise Exception("DataManager must have items to retrieve first item")
@@ -79,6 +71,9 @@ class AbstractDataManager(metaclass=ABCMeta):
         if len(self) == 0:
             raise Exception("DataManager must have items to retrieve first item")
         return list(self.data.items())[len(self)-1]
+
+    def reorder(self, keys_order):
+        self.data = OrderedDict([(key, self.data[key]) for key in keys_order])
 
 
 class DailyDataManager(AbstractDataManager):
@@ -112,6 +107,7 @@ class DailyDataManager(AbstractDataManager):
 
         return ran
 
+# TODO Create pandas wrapper class to be able to manage data after completion of kalman filter.
 
 
 
