@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<companies>
+    <company code="WOW" name="Woolworths Ltd">
+        <cap>large</cap>
+        <industry>Consumer Staples</industry>
+    </company>
+    <company code="WES" name="Westfarmers Ltd">
+        <cap>large</cap>
+        <industry>Consumer Staples</industry>
+    </company>
+    <company code="CCL" name="Coca-Cola Amatil Ltd">
+        <cap>large</cap>
+        <industry>Consumer Staples</industry>
+    </company>
+    <company code="TWE" name="Treasury Wine Estates Ltd">
+        <cap>large</cap>
+        <industry>Consumer Staples</industry>
+    </company>
+    <company code="MTS" name="Metacash Ltd">
+        <cap>mid</cap>
+        <industry>Consumer Staples</industry>
+    </company>
+</companies>
+<!-- As profiled by commsec TODO better methods of classifying competitors on market share.-->
