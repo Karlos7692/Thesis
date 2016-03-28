@@ -47,15 +47,21 @@
 # print(next(c))
 
 import pandas
+from pandas import Series
 import math
 import matplotlib.pyplot as plt
 
 df = pandas.read_csv('resources/data/commsec/WOW.20060307-20160307.csv', parse_dates=['Date'], dayfirst=True,
                      usecols=['Date', 'Opening Price', 'High Sale Price',  'Low Sale Price', 'Closing Price',
                               'Total Volume Traded'])
+
 df.sort_values(by='Date', inplace=True)
 
-df = df[df['Total Volume Traded'] != 0]
+df['Opening Price'].replace(to_replace=0, method='ffill', inplace=True)
+df['High Sale Price'].replace(to_replace=0, method='ffill', inplace=True)
+df['Low Sale Price'].replace(to_replace=0, method='ffill', inplace=True)
+df['Closing Price'].replace(to_replace=0, method='ffill', inplace=True)
+df['Total Volume Traded'].replace(to_replace=0, value=df['Total Volume Traded'].mean(), inplace=True)
 df['Total Volume Traded'] = df['Total Volume Traded'].apply(func=math.log1p)
 
 tvmean = df['Total Volume Traded'].mean()
@@ -67,8 +73,20 @@ def normalize(v):
 
 
 df['Total Volume Traded'] = df['Total Volume Traded'].apply(func=normalize)
-
-print(df['Total Volume Traded'])
 df.hist(column='Total Volume Traded', figsize=(15,7), bins=15)
-#df.plot(x='Date', y='Total Volume Traded')
+df.plot(x='Date', y='Total Volume Traded', title='ln Traded Volume')
 plt.show()
+
+from pandas.tools.plotting import autocorrelation_plot
+
+autocorrelation_plot(df['Opening Price'])
+autocorrelation_plot(df['High Sale Price'])
+autocorrelation_plot(df['Low Sale Price'])
+autocorrelation_plot(df['Closing Price'])
+autocorrelation_plot(df['Total Volume Traded'])
+df.plot(x='Date', y=['Opening Price', 'Closing Price', 'High Sale Price', 'Low Sale Price'], color=['blue', 'purple', 'green', 'red'])
+plt.show()
+
+ops = df['Opening Price']
+zp = ops[ops == 0]
+print(zp)

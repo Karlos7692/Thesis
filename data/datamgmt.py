@@ -6,7 +6,7 @@ Abstract Data Manager classes. To be implemented in each data manager type.
 """
 
 # Abstract Data Manager. The default class handling any data.
-class AbstractDataManager(metaclass=ABCMeta):
+class OldAbstractDataManager(metaclass=ABCMeta):
 
     INVALID_POSITION = -1
 
@@ -76,7 +76,7 @@ class AbstractDataManager(metaclass=ABCMeta):
         self.data = OrderedDict([(key, self.data[key]) for key in keys_order])
 
 
-class DailyDataManager(AbstractDataManager):
+class DailyDataManager(OldAbstractDataManager):
 
     @abstractmethod
     def read_data(self, start_date=None, end_date=None):
@@ -109,5 +109,51 @@ class DailyDataManager(AbstractDataManager):
 
 # TODO Create pandas wrapper class to be able to manage data after completion of kalman filter.
 
+import pandas as pd
 
 
+class AbstractDataManager(metaclass=ABCMeta):
+
+    @abstractmethod
+    def __clean_data__(self):
+        pass
+
+    @abstractmethod
+    def __transform_data__(self):
+        pass
+
+
+class AbstractDataReaderManager(AbstractDataManager):
+
+    def __init__(self, ticker):
+        self.ticker = ticker
+        self.__read_data__(ticker)
+        self.__clean_data__()
+        self.__transform_data__()
+
+    @abstractmethod
+    def __read_data__(self, ticker: str):
+        pass
+
+    @abstractmethod
+    def __clean_data__(self):
+        pass
+
+    @abstractmethod
+    def __transform_data__(self):
+        pass
+
+
+class AbstractDataMergeManager(AbstractDataManager):
+
+    @abstractmethod
+    def __merge__(self):
+        pass
+
+    @abstractmethod
+    def __clean_data__(self):
+        pass
+
+    @abstractmethod
+    def __transform_data__(self):
+        pass
