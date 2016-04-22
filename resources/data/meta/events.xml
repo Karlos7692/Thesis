@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<events>
+    <event name="Dexus Consolidation">
+        <date>yyyyMMdd</date>
+        <description>What happened</description>
+        <affected-companies>
+            <company name="" ticker="" effect="+/- $dollars"/>
+            <industry name="" />
+        </affected-companies>
+    </event>
+    <event name="Dexus Divdend">
+        <description>Dexus paid dividend, blah average</description>
+    </event>
+</events>

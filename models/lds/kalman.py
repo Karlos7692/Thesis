@@ -2,6 +2,7 @@ from models.models import LDS, Axis
 from models import probability as prob
 from scipy.linalg import pinv
 import numpy as np
+from sklearn.decomposition import PCA
 
 
 class KalmanFilter(LDS):
@@ -16,23 +17,23 @@ class KalmanFilter(LDS):
         self.observations_size = observations_size
 
         # Kalman parameters.
-        self.A_0tT = np.empty((state_space_size, state_space_size, 0))
-        self.B_0tT = np.empty((state_space_size, state_space_size, 0))
-        self.C_0tT = np.empty((observations_size, state_space_size, 0))
-        self.D_0tT = np.empty((observations_size, state_space_size, 0))
-        self.Q_0tT = np.empty((state_space_size, state_space_size, 0))
-        self.R_0tT = np.empty((observations_size, observations_size, 0))
+        self.As = np.empty((state_space_size, state_space_size, 0))
+        self.Bs = np.empty((state_space_size, state_space_size, 0))
+        self.Cs = np.empty((observations_size, state_space_size, 0))
+        self.Ds = np.empty((observations_size, state_space_size, 0))
+        self.Qs = np.empty((state_space_size, state_space_size, 0))
+        self.Rs = np.empty((observations_size, observations_size, 0))
 
         # Kalman State
-        self.mu_0tT = np.empty((state_space_size, 1, 0))
-        self.V_tt0 = np.empty((state_space_size, state_space_size, 0))
+        self.mus = np.empty((state_space_size, 1, 0))
+        self.Vs = np.empty((state_space_size, state_space_size, 0))
 
         # Initialize initial values
         self.initialize(init_params, init_mu, init_V)
 
         # History:
-        self.y_0tT = np.empty((observations_size, 1, 0))
-        self.u_0tT = np.empty((state_space_size, 1, 0))
+        self.ys = np.empty((observations_size, 1, 0))
+        self.us = np.empty((state_space_size, 1, 0))
 
     def initialize(self, init_params, init_mu, init_V):
         (A, B, C, D, Q, R) = init_params
@@ -65,7 +66,7 @@ class KalmanFilter(LDS):
     def predict_covariance(self, A, V, Q, init=False):
         return A @ V @ A.T + Q
 
-    def kalman_filter(self, likelihood=False):
+    def filter(self, likelihood=False):
         """
         Filter values from observed data points.
         :param likelihood:
@@ -91,14 +92,14 @@ class KalmanFilter(LDS):
 
             (y_t, _) = self.data(t)
 
-            ll = self.kalman_update(t, mu_pred, V_pred, y_t, y_pred, likelihood)
+            ll = self.update(t, mu_pred, V_pred, y_t, y_pred, likelihood)
 
             if likelihood:
                 ll_sum += ll
 
         return y_pred_online, ll_sum
 
-    def kalman_update(self, t, mu_pred, V_pred, y_t, y_pred, compute_likelihood=False):
+    def update(self, t, mu_pred, V_pred, y_t, y_pred, compute_likelihood=False):
         (A, B, C, D, Q, R) = self.parameters(t - 1)
 
         # Residuals
@@ -120,25 +121,25 @@ class KalmanFilter(LDS):
 
         return likelihood
 
-    def kalman_smooth(self, likelihood=False):
+    def smooth_filter(self, likelihood=False):
         # Time arguments
         init_t = self.init_t
-        final_t = self.y_0tT.shape[Axis.time] - 1
+        final_t = self.ys.shape[Axis.time] - 1
 
-        (y_pred_online, ll_sum) = self.kalman_filter(likelihood)
-        V_smooth_tp1_ts = np.empty(self.V_tt0[:, :, 1:].shape)
+        (y_pred_online, ll_sum) = self.filter(likelihood)
+        V_smooth_tp1_ts = np.empty(self.Vs[:, :, 1:].shape)
 
         # Start smoothing from t+1 given t
         for t in range(final_t - 1, init_t, -1):
-            u_t = self.u_0tT[:, :, t]
+            u_t = self.us[:, :, t]
             mu_pred_tp1, V_pred_tp1 = self.state(t + 1)
             mu_pred_t, V_pred_t = self.state(t)
-            V_smooth_tp1_ts[:, :, t] = self.kalman_smooth_update(t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred_t, V_pred_t)
+            V_smooth_tp1_ts[:, :, t] = self.smooth_update(t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred_t, V_pred_t)
 
         return y_pred_online, ll_sum, V_smooth_tp1_ts
 
     # Given prediction t+1, smooth prediction at t
-    def kalman_smooth_update(self, t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred, V_pred):
+    def smooth_update(self, t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred, V_pred):
         (A, B, C, D, Q, R) = self.parameters(t)
 
         # E[E[t| t+1, ys]] and Cov(t+1| t (prediction))
@@ -165,11 +166,11 @@ class KalmanFilter(LDS):
         :return: The parameters (tuple) at time t with respect to the observations
         """
         if self.fixed_params:
-            return (self.A_0tT[:, :, 0], self.B_0tT[:, :, 0], self.C_0tT[:, :, 0], self.D_0tT[:, :, 0],
-                    self.Q_0tT[:, :, 0], self.R_0tT[:, :, 0])
+            return (self.As[:, :, 0], self.Bs[:, :, 0], self.Cs[:, :, 0], self.Ds[:, :, 0],
+                    self.Qs[:, :, 0], self.Rs[:, :, 0])
 
-        return (self.A_0tT[:, :, t + 1], self.B_0tT[:, :, t + 1], self.C_0tT[:, :, t + 1], self.D_0tT[:, :, t + 1],
-                self.Q_0tT[:, :, t + 1], self.R_0tT[:, :, t + 1])
+        return (self.As[:, :, t + 1], self.Bs[:, :, t + 1], self.Cs[:, :, t + 1], self.Ds[:, :, t + 1],
+                self.Qs[:, :, t + 1], self.Rs[:, :, t + 1])
 
     def state(self, t):
         """
@@ -178,7 +179,7 @@ class KalmanFilter(LDS):
         :param t: The time with respect to the observations.
         :return: The cached state (tuple) at time t with respect to the observations
         """
-        return self.mu_0tT[:, :, t + 1], self.V_tt0[:, :, t + 1]
+        return self.mus[:, :, t + 1], self.Vs[:, :, t + 1]
 
     def update_parameters(self, t, A_t, B_t, C_t, D_t, Q_t, R_t):
         """
@@ -191,56 +192,87 @@ class KalmanFilter(LDS):
         :param R_t: R_t respect to time t
         :return:
         """
-        if self.fixed_params and self.A_0tT.shape[Axis.time] == 1:
-            self.A_0tT[:, :, 0] = A_t
-            self.B_0tT[:, :, 0] = B_t
-            self.C_0tT[:, :, 0] = C_t
-            self.D_0tT[:, :, 0] = D_t
-            self.Q_0tT[:, :, 0] = Q_t
-            self.R_0tT[:, :, 0] = R_t
+        if self.fixed_params and self.As.shape[Axis.time] == 1:
+            self.As[:, :, 0] = A_t
+            self.Bs[:, :, 0] = B_t
+            self.Cs[:, :, 0] = C_t
+            self.Ds[:, :, 0] = D_t
+            self.Qs[:, :, 0] = Q_t
+            self.Rs[:, :, 0] = R_t
             return
 
         # Not fixed, adjust parameters at t
-        if t + 1 < self.A_0tT.shape[Axis.time]:
-            self.A_0tT[:, :, t+1] = A_t
-            self.B_0tT[:, :, t+1] = B_t
-            self.C_0tT[:, :, t+1] = C_t
-            self.D_0tT[:, :, t+1] = D_t
-            self.Q_0tT[:, :, t+1] = Q_t
-            self.R_0tT[:, :, t+1] = R_t
+        if t + 1 < self.As.shape[Axis.time]:
+            self.As[:, :, t + 1] = A_t
+            self.Bs[:, :, t + 1] = B_t
+            self.Cs[:, :, t + 1] = C_t
+            self.Ds[:, :, t + 1] = D_t
+            self.Qs[:, :, t + 1] = Q_t
+            self.Rs[:, :, t + 1] = R_t
             return
 
-        self.A_0tT = np.insert(self.A_0tT, t+1, A_t, axis=2)
-        self.B_0tT = np.insert(self.B_0tT, t+1, B_t, axis=2)
-        self.C_0tT = np.insert(self.C_0tT, t+1, C_t, axis=2)
-        self.D_0tT = np.insert(self.D_0tT, t+1, D_t, axis=2)
-        self.Q_0tT = np.insert(self.Q_0tT, t+1, Q_t, axis=2)
-        self.R_0tT = np.insert(self.R_0tT, t+1, R_t, axis=2)
+        self.As = np.insert(self.As, t + 1, A_t, axis=2)
+        self.Bs = np.insert(self.Bs, t + 1, B_t, axis=2)
+        self.Cs = np.insert(self.Cs, t + 1, C_t, axis=2)
+        self.Ds = np.insert(self.Ds, t + 1, D_t, axis=2)
+        self.Qs = np.insert(self.Qs, t + 1, Q_t, axis=2)
+        self.Rs = np.insert(self.Rs, t + 1, R_t, axis=2)
 
     def update_state(self, t, mu_t, V_t):
-        self.mu_0tT = np.insert(self.mu_0tT, t + 1, mu_t, axis=2)
-        self.V_tt0 = np.insert(self.V_tt0, t + 1, V_t, axis=2)
+        self.mus = np.insert(self.mus, t + 1, mu_t, axis=2)
+        self.Vs = np.insert(self.Vs, t + 1, V_t, axis=2)
 
     def data(self, t):
         if t == self.init_t:
             return None, np.zeros((self.state_size, 1))
-        return self.y_0tT[:, :, t], self.u_0tT[:, :, t]
+        return self.ys[:, :, t], self.us[:, :, t]
 
     def observe(self, t, y_t, u_t):
-        self.y_0tT = np.insert(self.y_0tT, t, y_t, axis=2)
-        self.u_0tT = np.insert(self.u_0tT, t, u_t, axis=2)
+        self.ys = np.insert(self.ys, t, y_t, axis=2)
+        self.us = np.insert(self.us, t, u_t, axis=2)
 
     def observe_point(self, y_t):
         t = self.n_observations() - 1
-        self.y_0tT = np.insert(self.y_0tT, t, y_t, axis=2)
+        self.ys = np.insert(self.ys, t, y_t, axis=2)
 
     def observe_conditional(self, u_t):
-         t = self.u_0tT.shape[Axis.time] - 1
-         self.u_0tT = np.insert(self.u_0tT, t, u_t, axis=2)
+         t = self.us.shape[Axis.time] - 1
+         self.us = np.insert(self.us, t, u_t, axis=2)
 
     def n_observations(self):
-        return self.y_0tT.shape[Axis.time]
+        return self.ys.shape[Axis.time]
 
+    # Fitting functions:
+    @staticmethod
+    def __init_fit__(ys, state_size):
+        (r, c, t) = ys.shape
+        ys = ys.reshape((r, t)).T
 
-class KalmanStateManager(object):
-    pass
+        # Initialize A as identity + some noise
+        A = np.identity(state_size) + 0.1*np.random.random(state_size)
+        B = np.zeros((state_size,state_size))
+
+        decomposition = PCA(n_components=r)
+        decomposition.fit(ys)
+        C = decomposition.explained_variance_ratio_.reshape((r, c))
+        D = np.zeros(C.shape)
+
+        # Variance
+        Q = decomposition.get_covariance()
+        obs_var = np.var(ys, axis=1)
+        R = np.diag(obs_var)
+
+        # Initial State
+        # TODO Work out PCA initial values
+        init_mu = np.zeros((state_size, 1))
+        init_V = np.zeros((state_size, state_size))
+
+        return  (A, B, C, D, Q, R), init_mu, init_V
+
+    def __estep__(self, ys, us, init_params, init_mu, init_V):
+        pass
+
+    def __mstep__(self):
+        pass
+
+#def lagged_model()

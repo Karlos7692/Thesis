@@ -47,9 +47,11 @@
 # print(next(c))
 
 import pandas
-from pandas import Series
+from pandas import Series, DataFrame
 import math
 import matplotlib.pyplot as plt
+from pandas.tools.plotting import autocorrelation_plot
+
 
 df = pandas.read_csv('resources/data/commsec/WOW.20060307-20160307.csv', parse_dates=['Date'], dayfirst=True,
                      usecols=['Date', 'Opening Price', 'High Sale Price',  'Low Sale Price', 'Closing Price',
@@ -72,21 +74,41 @@ def normalize(v):
     return (v-tvmean)/tvsd
 
 
-df['Total Volume Traded'] = df['Total Volume Traded'].apply(func=normalize)
-df.hist(column='Total Volume Traded', figsize=(15,7), bins=15)
-df.plot(x='Date', y='Total Volume Traded', title='ln Traded Volume')
-plt.show()
+# df['Total Volume Traded'] = df['Total Volume Traded'].apply(func=normalize)
+# df.hist(column='Total Volume Traded', figsize=(15,7), bins=15)
+# df.plot(x='Date', y='Total Volume Traded', title='ln Traded Volume')
+# plt.show()
+#
+# autocorrelation_plot(df['Opening Price'])
+# autocorrelation_plot(df['High Sale Price'])
+# autocorrelation_plot(df['Low Sale Price'])
+# autocorrelation_plot(df['Closing Price'])
+# autocorrelation_plot(df['Total Volume Traded'])
+# df.plot(x='Date', y=['Opening Price', 'Closing Price', 'High Sale Price', 'Low Sale Price'], color=['blue', 'purple', 'green', 'red'])
+# plt.show()
+#
+# oprs = df['Opening Price'].pct_change(25)
+# ohprs = df['High Sale Price'].pct_change(25)
+# olprs = df['Low Sale Price'].pct_change(25)
+# ocprs = df['Closing Price'].pct_change(25)
+# autocorrelation_plot(oprs)
+# autocorrelation_plot(ohprs)
+# autocorrelation_plot(olprs)
+# autocorrelation_plot(ocprs)
+# plt.show()
+#
+# rdf = DataFrame(data={'Date': df['Date'], 'Open': oprs, 'High': ohprs, 'Low': olprs, 'Close': ocprs})
+# rdf.plot(x='Date', y=['Open', 'Close', 'High', 'Low'], color=['blue', 'purple', 'green', 'red'])
+# rdf.hist(column='Open', figsize=(15,7), bins=15)
+# rdf.hist(column='Close', figsize=(15,7), bins=15)
+# rdf.hist(column='High', figsize=(15,7), bins=15)
+# rdf.hist(column='Low', figsize=(15,7), bins=15)
+# plt.show()
+#
+#
+# data = {'Date': df['Date'], 'Open': df['Opening Price'], 'High': df['High Sale Price'], 'Close': df['Closing Price']}
+# med = pandas.DataFrame(data=data)
+# med = med.median(axis=1)
+# print(med)
 
-from pandas.tools.plotting import autocorrelation_plot
 
-autocorrelation_plot(df['Opening Price'])
-autocorrelation_plot(df['High Sale Price'])
-autocorrelation_plot(df['Low Sale Price'])
-autocorrelation_plot(df['Closing Price'])
-autocorrelation_plot(df['Total Volume Traded'])
-df.plot(x='Date', y=['Opening Price', 'Closing Price', 'High Sale Price', 'Low Sale Price'], color=['blue', 'purple', 'green', 'red'])
-plt.show()
-
-ops = df['Opening Price']
-zp = ops[ops == 0]
-print(zp)
