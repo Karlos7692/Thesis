@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<commsec-data>
+    <industry name="Consumer Staples">
+        <index code="XJS" />
+        <company code="WOW" cap="large" name="Woolworths Ltd" />
+        <company code="WES" cap="large" name="Wesfarmers Ltd" />
+    </industry>
+</commsec-data>
