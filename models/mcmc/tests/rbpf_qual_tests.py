@@ -1,11 +1,10 @@
 import numpy as np
 from typing import List
 from models.mcmc.pf import KalmanParticle, ParticleFilter
-from matplotlib import pyplot as plt
 import sys
 
 # System Miss-specification noise
-SYSTEM_MISSPEC_NOISE = 0.00000001
+SYSTEM_MISSPEC_NOISE = 0.3
 EXOGENOUS_MISSPEC_NOISE = 0.25
 OBS_MISSPEC_NOISE = 0.01
 SSV_MISSPEC_NOISE = 0.01
@@ -96,8 +95,10 @@ print("Running Kalman Filter")
 kf_preds_data = kf_y_preds.flatten()
 rbpf_y_data = rbpf_y_preds.flatten()
 
+from matplotlib import pyplot as plt
 plt.plot(list(range(n_points)), ys.flatten())
 plt.plot(list(range(n_points)), kf_preds_data, color='red')
 plt.plot(list(range(n_points)), rbpf_y_data, color='green')
 plt.show()
 
+map(print, rbpf.particles)
