@@ -54,7 +54,7 @@ def dist(landmark):
 def sense():
         return np.array([dist(landmark) + np.random.normal(0.0, SENSE_NOISE) for landmark in world])
 
-N = 1000
+N = 3000
 init_particles = [RobotParticle(random.uniform(0, world_size), random.uniform(0, world_size)) for i in range(N)]
 (x, y) = ps_to_points(init_particles)
 plt.scatter(x, y)
