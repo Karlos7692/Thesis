@@ -20,6 +20,7 @@ SENSE_NOISE = 4
 class RobotParticle(Particle):
 
     def __init__(self, x, y):
+        super().__init__()
         self.location = np.array([x, y])
         self.sense_noise = SENSE_NOISE
 
@@ -34,6 +35,9 @@ class RobotParticle(Particle):
 
     def particle_predict(self, u_t) -> np.array:
         return self.location
+
+    def copy(self):
+        return RobotParticle(self.location[0], self.location[1])
 
     def __str__(self):
         return '[x={x}, y={y}]'.format(x=self.location[0], y=self.location[1])
@@ -63,9 +67,10 @@ z2 = [point[1] for point in world]
 plt.scatter(z, z2, c='red')
 plt.scatter([robot_actual_location[0]], [robot_actual_location[1]], c='purple')
 plt.show()
-pf = ParticleFilter(init_particles)
+pf = ParticleFilter(init_particles, 5)
 pf.observe(sense(), None)
-(x, y) = ps_to_points(pf.particles)
+pf_paricles = pf.draw()
+(x, y) = ps_to_points(pf_paricles)
 plt.scatter(x, y, c='blue')
 plt.scatter(z, z2, c='red')
 plt.scatter([robot_actual_location[0]], [robot_actual_location[1]], c='purple')

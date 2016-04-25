@@ -4,7 +4,7 @@ from models.mcmc.pf import KalmanParticle, ParticleFilter
 import sys
 
 # System Miss-specification noise
-SYSTEM_MISSPEC_NOISE = 0.3
+SYSTEM_MISSPEC_NOISE = 1
 EXOGENOUS_MISSPEC_NOISE = 0.25
 OBS_MISSPEC_NOISE = 0.01
 SSV_MISSPEC_NOISE = 0.01
@@ -18,7 +18,7 @@ INIT_PRIOR = 100000
 SS_VAR_X = 1
 SS_VAR_V = 1
 SS_VAR_C = 0.1
-OBS_VAR = 0.01
+OBS_VAR = 5
 
 
 def exogenous_movement(n):
@@ -37,8 +37,12 @@ def gauss(sigma):
     return np.random.normal(0, sigma)
 
 
+def compute_n_unique_particles(particles):
+    return len({p.label for p in particles})
+
+
 def kalman_particle_factory(a, b, c) -> List[KalmanParticle]:
-    A = np.array([[1 + gauss(SYSTEM_MISSPEC_NOISE), 1 + gauss(SYSTEM_MISSPEC_NOISE), c + gauss(SYSTEM_MISSPEC_NOISE)],
+    A = np.array([[1 + gauss(SYSTEM_MISSPEC_NOISE), 1 + gauss(SYSTEM_MISSPEC_NOISE), 1 + gauss(SYSTEM_MISSPEC_NOISE)],
                   [2*a + gauss(SYSTEM_MISSPEC_NOISE), 0 + gauss(SYSTEM_MISSPEC_NOISE), b + gauss(SYSTEM_MISSPEC_NOISE)],
                   [0, 0, 1]])
     B = np.array([[1 + gauss(EXOGENOUS_MISSPEC_NOISE), 0 + gauss(EXOGENOUS_MISSPEC_NOISE), 0 + gauss(EXOGENOUS_MISSPEC_NOISE)],
@@ -66,8 +70,8 @@ def kalman_particle_factory(a, b, c) -> List[KalmanParticle]:
 a = 0.3
 b = 0.2
 c = 5
-n_points = 300
-N = 1000
+n_points = 100
+N = 200
 ys = quadratic(a, b, c, n_points)
 us = exogenous_movement(n_points)
 
@@ -79,15 +83,20 @@ kf.us = us
 #Row Blackwellized PF
 rbpf_init_particles = []
 for i in range(N):
-    rbpf_init_particles.append(kalman_particle_factory(a, b, c))
+    p = kalman_particle_factory(a, b, c)
+    rbpf_init_particles.append(p.set_label("p={i}".format(i=i)))
 
-rbpf = ParticleFilter(init_particles=rbpf_init_particles)
-rbpf_y_preds = np.zeros((1, 1, 300))
+rbpf = ParticleFilter(rbpf_init_particles, 5)
+rbpf_y_preds = np.zeros((1, 1, n_points))
+n_unique_particles = []
 print("Running RBPF... Printing (t)")
 for t in range(n_points):
-    print('Processing point {t}.... '.format(t=t))
+    n_unique_particles.append(compute_n_unique_particles(rbpf.draw()))
+    print('Processing point {t}... '.format(t=t))
     rbpf_y_preds[:, :, t] = rbpf.predict(us[:, :, t])
     rbpf.observe(ys[:, :, t], us[:, :, t])
+
+
 
 print("Running Kalman Filter")
 (kf_y_preds, ll) = kf.filter(likelihood=True)
@@ -101,4 +110,29 @@ plt.plot(list(range(n_points)), kf_preds_data, color='red')
 plt.plot(list(range(n_points)), rbpf_y_data, color='green')
 plt.show()
 
-map(print, rbpf.particles)
+# Residual plots
+kf_res = (kf_y_preds - ys) * (kf_y_preds - ys)
+rbpf_res = (rbpf_y_preds - ys) * (rbpf_y_preds - ys)
+plt.plot(list(range(n_points)), kf_res.flatten(), color='red')
+plt.plot(list(range(n_points)), rbpf_res.flatten(), color='green')
+plt.show()
+
+# RBPF Statistics
+# Plot the weights at the end to measure final degeneracy.
+tally = {}
+for p in rbpf.draw():
+    if p.label not in tally:
+        tally = {**tally, **{p.label: 1}}
+    else:
+        tally[p.label] += 1
+
+labels = list(tally.keys())
+values = [tally[key] for key in labels]
+values_sum = sum(values)
+values = [v/values_sum for v in values]
+plt.bar(list(range(len(labels))), tuple(values), 0.35)
+plt.xticks([i + 0.175 for i in range(len(labels))], tuple(labels))
+plt.show()
+
+plt.plot(list(range(n_points)), n_unique_particles, color='red')
+plt.show()
