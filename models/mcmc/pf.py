@@ -5,7 +5,13 @@ from models.lds.kalman import KalmanFilter, Axis
 from typing import List
 
 
-def uniform_wheel_resampling(densities, particles):
+def unif_w_r(densities, particles):
+    """
+    Uniform wheel resampling. Resample based on uniform distribution as a circular buffer
+    :param densities: the pdfs of respective distribution
+    :param particles: the particles associated with the densities
+    :return:
+    """
     n = len(densities)
 
     # Draw from uniform distribution
@@ -18,11 +24,22 @@ def uniform_wheel_resampling(densities, particles):
         while beta > densities[density_index]:
             beta -= densities[density_index]
             density_index = (density_index + 1) % n
-        new_particles.append(particles[density_index])
+        new_particles.append(particles[density_index].copy())
     return new_particles
 
 
+def logp_identity(measurements):
+    return all([m < 0 for m in measurements])
+
+
 class Particle(object):
+
+    def __init__(self):
+        self.label = ""
+
+    def set_label(self, label):
+        self.label = label
+        return self
 
     @abstractmethod
     def particle_predict(self, u_t) -> np.array:
@@ -32,8 +49,16 @@ class Particle(object):
     def measure_likelihood(self, y: np.array, u: np.array) -> float:
         pass
 
+    @abstractmethod
+    def copy(self):
+        pass
+
 
 class KalmanParticle(Particle, KalmanFilter):
+
+    def __init__(self, init_params, init_mu, init_V):
+        Particle.__init__(self)
+        KalmanFilter.__init__(self, init_params, init_mu, init_V)
 
     def particle_predict(self, u_t) -> np.array:
 
@@ -58,26 +83,74 @@ class KalmanParticle(Particle, KalmanFilter):
 
         return KalmanFilter.update(self, tm1+1, mu_pred, V_pred, y, y_pred, compute_likelihood=True)
 
+    def copy(self):
+        As = np.copy(self.As)
+        Bs = np.copy(self.Bs)
+        Cs = np.copy(self.Cs)
+        Ds = np.copy(self.Ds)
+        Qs = np.copy(self.Qs)
+        Rs = np.copy(self.Rs)
+
+        mus = np.copy(self.mus)
+        Vs = np.copy(self.Vs)
+
+        ys = np.copy(self.ys)
+        us = np.copy(self.us)
+
+        init_params = (As[:, :, 0], Bs[:, :, 0], Cs[:, :, 0], Ds[:, :, 0], Qs[:, :, 0], Rs[:, :, 0])
+        init_mu = mus[:, :, 0]
+        init_V = Vs[:, :, 0]
+
+        particle = KalmanParticle(init_params, init_mu, init_V)
+        particle.As = As
+        particle.Bs = Bs
+        particle.Cs = Cs
+        particle.Ds = Ds
+        particle.Qs = Qs
+        particle.Rs = Rs
+
+        particle.mus = mus
+        particle.Vs = Vs
+
+        particle.ys = ys
+        particle.us = us
+
+        particle.label = self.label
+        return particle
+
 
 class ParticleFilter(object):
 
-    def __init__(self, init_particles: List[Particle]):
+    def __init__(self, init_particles: List[Particle], min_sample_space: int, resample_function=unif_w_r):
         self.particles = init_particles
-        self.EPS = np.finfo(float).eps
+        self.weights = [1.0/len(init_particles)] * len(init_particles)
+        self.min_sample_space = min_sample_space
+        self.resample_function = resample_function
 
     def predict(self, u_t) -> np.array:
-        return sum([p_i.particle_predict(u_t) for p_i in self.particles])/len(self.particles)
+        particles = self.draw()
+        return sum([p_i.particle_predict(u_t) for p_i in particles])/len(particles)
 
-    def observe(self, y: np.array, u: np.array, resample_function=uniform_wheel_resampling):
-        weights = self.__measure__(y, u)
-        self.particles = resample_function(weights, self.particles)
+    def observe(self, y: np.array, u: np.array):
+        densities = self.measure(y, u)
+        weights = [self.weights[i] * d for i, d in enumerate(densities)]
+        w_norm = sum(weights)
+        self.weights = [w/w_norm for w in weights]
 
-    def __measure__(self, y: np.array, u: np.array):
-        measurements = [p.measure_likelihood(y, u) for i, p in enumerate(self.particles)]
-        if logp_identity(measurements):
-            measurements = [np.exp(m) for m in measurements]
-        return measurements
+        # Re-sample if the sample-efficiency has fallen below minimum sample space size
+        if self.efficiency() < self.min_sample_space:
+            print("Resampling...")
+            self.particles = self.resample_function(self.weights, self.particles)
+            self.weights = [1.0/len(self.particles)] * len(self.particles)
 
+    def measure(self, y: np.array, u: np.array):
+        densities = [p.measure_likelihood(y, u) for i, p in enumerate(self.particles)]
+        if logp_identity(densities):
+            densities = [np.exp(m) for m in densities]
+        return densities
 
-def logp_identity(measurements):
-    return all([m < 0 for m in measurements])
+    def draw(self):
+        return self.resample_function(self.weights, self.particles)
+
+    def efficiency(self):
+        return 1/sum([w ** 2 for w in self.weights])
