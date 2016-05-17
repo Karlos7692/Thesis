@@ -38,13 +38,14 @@ class KalmanSpaceGenerator(KalmanFilter, SpaceGenerator):
             u_t = np.zeros((2,1))
 
             # Predict next state and add noise
-            mu_t = self.predict_state(A, B, mu_tm1, u_t, tm1 == init)
+            mu_t = self.predict_state(A, B, mu_tm1, u_t) + q_t
             y_t = self.predict_observable(C, D, mu_t, u_t) + r_t
 
             # Store Data
             self.update_state(t, mu_t, V_t)
             self.observe(t, y_t, u_t)
         return self.ys, self.us
+
 
 def line_gen(n):
     ys = np.empty(shape=(1, 1, n))
