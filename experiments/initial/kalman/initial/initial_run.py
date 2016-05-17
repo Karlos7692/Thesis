@@ -61,6 +61,11 @@ kf.us = conds
 (x, y, t) = y_pred.shape
 pred = pd.DataFrame(y_pred.reshape((x, t)).T, columns=['Predicted Liquidity', 'Predicted Prices'])
 
+# Projected prices
+# (projection, V_projections) = kf.project(30)
+# plt.plot(projection[1, :, :].flatten(), c='r')
+# plt.show()
+
 # Ordinary Least Squares Calculation
 ols = sum((rmd.data.values[:, 2] - pred.values[:, 1]) * (rmd.data.values[:, 2] - pred.values[:, 1])) / 2
 print(ols)
@@ -98,7 +103,8 @@ df_exec = pd.DataFrame({'Date': rmd.data[ccs.date.value].values[1:],
                         'RMD High': rmd_allprices.data['RMD High'].values[1:],
                         'RMD Low': rmd_allprices.data['RMD Low'].values[1:], 'Executed': executed,
                         'Not Executed': not_executed, 'Cum Profit': cum_profit})
-df_exec.plot(x='Date', y=['RMD High', 'RMD Low', 'Cum Profit'])
+df_exec.plot(x='Date', y=['RMD High', 'RMD Low', 'Cum Profit', 'Executed', 'Not Executed'])
 profit = np.sum(executed) + np.sum(not_executed)
 print(profit)
 plt.show()
+

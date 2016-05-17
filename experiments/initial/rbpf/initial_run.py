@@ -6,8 +6,8 @@ import numpy as np
 from models.models import Axis
 
 MISSPEC = 0.01
-ZERO_MISSPEC = 0.001
-MISSPEC_VAR = 0.0001
+ZERO_MISSPEC = 0.0001
+MISSPEC_VAR = 0.001
 def gauss(sigma):
     return np.random.normal(0, sigma)
 
@@ -69,7 +69,7 @@ obs = obs.T
 obs = obs.reshape((obs.shape[0], 1, obs.shape[1]))
 conds = np.zeros((5, 1, obs.shape[2]))
 
-N = 500
+N = 300
 init_rbpf_particles = [kalman_particle_factory().set_label("p={i}".format(i=i)) for i in range(N)]
 rbpf = ParticleFilter(init_rbpf_particles, 30)
 
