@@ -42,11 +42,19 @@ class Particle(object):
         return self
 
     @abstractmethod
+    def project(self, n):
+        pass
+
+    @abstractmethod
     def particle_predict(self, u_t) -> np.array:
         pass
 
     @abstractmethod
     def measure_likelihood(self, y: np.array, u: np.array) -> float:
+        pass
+
+    @abstractmethod
+    def observe(self, t, y_t, u_t):
         pass
 
     @abstractmethod
@@ -60,10 +68,17 @@ class KalmanParticle(Particle, KalmanFilter):
         Particle.__init__(self)
         KalmanFilter.__init__(self, init_params, init_mu, init_V)
 
+    def project(self, n):
+        return KalmanFilter.project(self, n)
+
+    def observe(self, t, y_t, u_t):
+        KalmanFilter.observe(self, t, y_t, u_t)
+
     def particle_predict(self, u_t) -> np.array:
 
         # Current time t (mus indexed at +1, for initial mu value)
         t = self.mus.shape[Axis.time] - 2
+
         (A, B, C, D, Q, R) = self.parameters(t)
         (mu, V) = self.state(t)
 
@@ -81,6 +96,10 @@ class KalmanParticle(Particle, KalmanFilter):
         (y_pred, mu_pred) = self.predict(A, B, C, D, mu, u)
         V_pred = self.predict_covariance(A, V, Q)
 
+        # Update observation
+        self.observe(tm1+1, y, u)
+
+        # Update State
         return KalmanFilter.update(self, tm1+1, mu_pred, V_pred, y, y_pred, compute_likelihood=True)
 
     def copy(self):
@@ -121,15 +140,19 @@ class KalmanParticle(Particle, KalmanFilter):
 
 class ParticleFilter(object):
 
-    def __init__(self, init_particles: List[Particle], min_sample_space: int, resample_function=unif_w_r):
+    def __init__(self, init_particles: List[Particle], min_sample_space: int, resample_function=unif_w_r,
+                 eta=1.0):
         self.particles = init_particles
         self.weights = [1.0/len(init_particles)] * len(init_particles)
         self.min_sample_space = min_sample_space
         self.resample_function = resample_function
+        self.eta = eta
+
+    def project(self, n):
+        return sum([self.weights[i] * p_i.project(n) for i, p_i in enumerate(self.particles)])
 
     def predict(self, u_t) -> np.array:
-        particles = self.draw()
-        return sum([p_i.particle_predict(u_t) for p_i in particles])/len(particles)
+        return sum([self.weights[i] * p_i.particle_predict(u_t) for i, p_i in enumerate(self.particles)])
 
     def observe(self, y: np.array, u: np.array):
         densities = self.measure(y, u)
@@ -146,7 +169,7 @@ class ParticleFilter(object):
     def measure(self, y: np.array, u: np.array):
         densities = [p.measure_likelihood(y, u) for i, p in enumerate(self.particles)]
         if logp_identity(densities):
-            densities = [np.exp(m) for m in densities]
+            densities = [np.exp(m * 1/self.eta) for m in densities]
         return densities
 
     def draw(self):
