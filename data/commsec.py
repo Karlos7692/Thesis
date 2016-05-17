@@ -183,10 +183,6 @@ class CommsecDataManager(AbstractCommsecDataManager, AbstractDataReaderManager):
     """
     Feature Management and Iteration
     """
-    def __next__(self):
-        # TODO
-        pass
-
     def __getitem__(self, item):
         if isinstance(item, int):
             date = self.data.iloc[item][CommsecColumns.date.value]
@@ -195,11 +191,16 @@ class CommsecDataManager(AbstractCommsecDataManager, AbstractDataReaderManager):
         data_slice = self.data[item]
         return data_slice[CommsecColumns.date.value].values, data_slice[self.features()].values
 
-    def next_observation(self, contract: FeatureContract):
-        pass
+    """
+    Data Set Management
+    """
+    def get_data_set(self, start_date, end_date, end_inclusive=False):
+        if end_inclusive:
+            mask = (start_date <= self.data[CommsecColumns.date.value]) & (self.data[CommsecColumns.date.value] <= end_date)
+        else:
+            mask = (start_date <= self.data[CommsecColumns.date.value]) & (self.data[CommsecColumns.date.value] < end_date)
+        return self.data.loc[mask]
 
-    def observations(self, contract, slice):
-        pass
 
 
 class CommsecMergeManager(AbstractCommsecDataManager, AbstractMergeManager):
