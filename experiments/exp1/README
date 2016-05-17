@@ -1,0 +1,15 @@
+Experiment 1: Comparison ARMA and Kalman Filter.
+
+Aim:
+Compare Performance of a Linear Dynamical System with an ARMA, and ARIMA model
+
+Experiment Requirements:
+We should only use price as an observable variable when comparing ARMA and the Kalman Filter
+Define a period of n days that are assumed to be covariance stationary.
+Split into Training/Cross-Validation and Training/Test Sets respectively
+
+
+Experiment Variables:
+
+
+
