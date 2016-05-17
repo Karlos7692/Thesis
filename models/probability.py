@@ -6,7 +6,7 @@ from scipy.linalg import inv
 def mvn_likelihood(x, mu, Sigma):
     # Work around for multivariate_normal logpdf, since it only accepts dimensions as arrays
     # Reshape arrays to 1 dim
-    if mu.ndim != 1:
+    if mu.ndim != 1 and not isinstance(mu, float):
         (rows, cols) = mu.shape
         x = x.reshape((rows))
         mu = mu.reshape((rows))
