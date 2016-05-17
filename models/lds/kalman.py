@@ -1,11 +1,39 @@
+from collections import OrderedDict
+
 from models.models import LDS, Axis
 from models import probability as prob
 from scipy.linalg import pinv
+import os
 import numpy as np
-from sklearn.decomposition import PCA
+import json
+import utils
+
+
+def g_kalman_prms(obs_size, state_size):
+    """
+    Parameters of the following form. You can fit kalman filters for hidden states specified by changing the hidden
+    model, to (quadratic, cubic etc).
+    :param obs_size: The number of observations
+    :param state_size:
+    :return:
+    """
+    A = np.eye(state_size, state_size) + 0.01 * gauss(state_size, state_size)
+    B = np.eye(state_size, state_size)
+    C = np.eye(obs_size, state_size) + 0.001 * gauss(obs_size, state_size)
+    D = np.eye(obs_size, state_size)
+    Q = np.eye(state_size, state_size)
+    R = uniform(obs_size, obs_size)
+
+    init_mu = np.array([[1 if obs_size < r == state_size -1 else 0] for r in range(state_size)])
+    init_V = np.eye(state_size, state_size)
+
+    return (A, B, C, D, Q, R), init_mu, init_V
+
+CACHE_EXT = ".json"
 
 
 class KalmanFilter(LDS):
+
     def __init__(self, init_params, init_mu, init_V, fixed=True):
         (A, B, C, D, Q, R) = init_params
         state_space_size = A.shape[Axis.rows]
@@ -40,17 +68,158 @@ class KalmanFilter(LDS):
         self.update_parameters(self.init_t, A, B, C, D, Q, R)
         self.update_state(self.init_t, init_mu, init_V)
 
-    # Train using EM maximisation algorithm init_data, init_conditional_inputs
-    def fit(self, observations, conditional_inputs):
-        if observations.shape[int(Axis.rows)] != self.observations_size:
-            raise Exception("Observations size is supposed to be ({s}xn) but found ({s2}x{s3})"
-                            .format(s=self.observations_size, s2=observations.shape[int(Axis.rows)],
-                                    s3=observations.shape[int(Axis.cols)]))
+    def reset(self):
+        # Kalman parameters.
+        self.As = np.empty((self.state_size, self.state_size, 0))
+        self.Bs = np.empty((self.state_size, self.state_size, 0))
+        self.Cs = np.empty((self.observations_size, self.state_size, 0))
+        self.Ds = np.empty((self.observations_size, self.state_size, 0))
+        self.Qs = np.empty((self.state_size, self.state_size, 0))
+        self.Rs = np.empty((self.observations_size, self.observations_size, 0))
 
-        if conditional_inputs.shape[int(Axis.rows)] != self.state_size:
-            raise Exception("Conditional inputs size is supposed to be ({s}xn) but found ({s2}x{s3})"
-                            .format(s=self.state_size, s2=conditional_inputs.shape[int(Axis.rows)],
-                                    s3=conditional_inputs.shape[int(Axis.cols)]))
+        # Kalman State
+        self.mus = np.empty((self.state_size, 1, 0))
+        self.Vs = np.empty((self.state_size, self.state_size, 0))
+
+        # History:
+        self.ys = np.empty((self.observations_size, 1, 0))
+        self.us = np.empty((self.state_size, 1, 0))
+
+    # Train using EM maximisation algorithm init_data, init_conditional_inputs
+    # Note that conditional variables implicitly give the number of latent variables.
+    @classmethod
+    def fit(cls, ys, us, initial_kalman_params, iters=2, use_last_to_init=False, debug_limit=10):
+        (init_params, init_mu, init_V) = initial_kalman_params
+        try:
+            kf = cls(init_params, init_mu, init_V)
+            ll_hists = []
+            for i in range(iters):
+
+                (C1_ts, C2_ts, P_ts, P_t_tm1s, P_tm1s, G_ts, ll_hist) = kf.__e__(ys, us)
+                (init_params, init_mu, init_V) = kf.__m__(C1_ts, C2_ts, P_ts, P_t_tm1s, P_tm1s, G_ts)
+
+                kf.reset()
+                kf.initialize(init_params, init_mu, init_V)
+                ll_hists.append(ll_hist)
+
+            if use_last_to_init:
+                kf.ys = ys
+                kf.us = us
+                kf.filter()
+                t = ys.shape[Axis.time] - 1
+                init_params = kf.parameters(t)
+                (mu_t, V_t) = kf.state(t)
+                kf.reset()
+                kf.initialize(init_params, mu_t, V_t)
+        except ValueError:
+            print("There is a problem with the kalman stability.")
+            raise ValueError("There is a problem with the kalman stability.")
+
+        return kf, ll_hists
+
+    def __e__(self, ys, us):
+        """
+        We will be fitting these parameters we will throw away the first observation, to work out the prior in this
+        for the hidden state in this sequence.
+        :param ys:
+        :param us:
+        :return:
+        """
+
+        # Initial values
+        init_y = ys[:, :, 0]
+        init_mu = self.mus[:, :, 0]
+        init_V = self.Vs[:, :, 0]
+
+        self.ys = ys[:, :, 1:]
+        self.us = us[:, :, 1:]
+
+        # Note that we set the ys and us to be one less observation
+        n = self.n_observations() + 1
+
+        # These values will be with respect to actual observations t. Not filter_t, see comments below.
+        C1_ts = np.zeros((self.observations_size, self.state_size, n))
+        C2_ts = np.zeros((self.observations_size, self.observations_size, n))
+        P_ts = np.zeros((self.state_size, self.state_size, n))
+        P_t_tm1s = np.zeros((self.state_size, self.state_size, n))
+        P_tm1s = np.zeros((self.state_size, self.state_size, n))
+        G_ts = np.zeros((self.state_size, self.observations_size, n))
+
+        (y_pred_online, ll_hist, V_smooth_tp1_ts) = self.smooth_filter(likelihood=True)
+
+        # Note that these values are the smoothed mus from the backward algorithm.
+
+        # Calculate initial Expectations.
+        P_ts[:, :, 0] = init_V + init_mu @ init_mu.T
+
+        # No P_tm1 or P_t_tm1 at t = 0
+
+        # Calculate initial values needed for maximisation step
+        C1_ts[:, :, 0] = init_y @ init_mu.T
+        C2_ts[:, :, 0] = init_y @ init_y.T
+        G_ts[:, :, 0] = init_mu @ init_y.T
+
+        # Initial t index is out by 1 since we removed the first observation from filtering, to use as initial prior.
+        # The data observed by the filter will thus be out by 1.
+        # Let t represent the actual observation index and filter_t be the index observed by the filter. ie:
+        # filter_t = 0..n-1 <=> t = 1..n
+        for filter_t in range(n-1):
+            t = filter_t + 1
+            (y_t, u_t) = self.data(filter_t)
+            (mu_t, V_t) = self.state(filter_t)
+            C1_ts[:, :, t] = y_t @ mu_t.T
+            C2_ts[:, :, t] = y_t @ y_t.T
+            G_ts[:, :, t] = mu_t @ y_t.T
+            P_ts[:, :, t] = V_t + mu_t @ mu_t.T
+
+            (mu_tm1, V_tm1) = self.state(filter_t-1)
+            P_t_tm1s[:, :, t] = V_smooth_tp1_ts[:, :, filter_t] + mu_t @ mu_tm1.T
+            P_tm1s[:, :, t] = V_tm1 + mu_tm1 @ mu_tm1.T
+
+        return C1_ts, C2_ts, P_ts, P_t_tm1s, P_tm1s, G_ts, ll_hist
+
+    def __m__(self, C1_ts, C2_ts, P_ts, P_t_tm1s, P_tm1s, G_ts):
+
+        # Same as e step, we used initial observation to calculate the prior.
+        n = self.n_observations() + 1
+
+        C1_sum = np.sum(C1_ts, axis=2)
+        P_t_sum = np.sum(P_ts, axis=2)
+        P_t_tm1_sum_1tT = np.sum(P_t_tm1s[:, :, :], axis=2)
+        P_tm1_sum_1tT = np.sum(P_tm1s[:, :, :], axis=2)
+
+        # Output matrix fit.
+        C = C1_sum @ pinv(P_t_sum)
+
+        # Observation covariance fit.
+        R = np.zeros((self.observations_size, self.observations_size))
+        for t in range(n):
+            R += C2_ts[:, :, t] - C @ G_ts[:, :, t]
+        R *= 1.0/n
+
+        # State dynamics
+        A = P_t_tm1_sum_1tT @ pinv(P_tm1_sum_1tT)
+
+        # Hidden Noise
+        Q = 1.0/(n-1) * (np.sum(P_ts[:, :, 1:], axis=2) - A @ P_t_tm1_sum_1tT)
+
+        # Control signal
+        B = self.Bs[:, :, 0]
+        D = self.Ds[:, :, 0]
+
+        # Initial state
+        init_mu = self.mus[:, :, 0]
+        init_V = P_ts[:, :, 0] - init_mu @ init_mu.T
+
+        return (A, B, C, D, Q, R), init_mu, init_V
+
+    # TODO Clean up predict names such that predict online becomes the default predict method
+    def predict_online(self, u_t):
+        t = self.mus.shape[Axis.time] - 1
+        (mu_tm1, V_tm1) = self.state(t-1)
+        (A, B, C, D, Q, R) = self.parameters(t-1)
+        (y_pred, mu_pred) = self.predict(A, B, C, D, mu_tm1, u_t)
+        return y_pred
 
     def predict(self, A, B, C, D, mu_t, u_t):
         mu_pred = self.predict_state(A, B, mu_t, u_t)
@@ -60,22 +229,33 @@ class KalmanFilter(LDS):
     def predict_observable(self, C, D, mu_pred, u_t):
         return C @ mu_pred + D @ u_t
 
-    def predict_state(self, A, B, mu_t, u_t, init=False):
+    def predict_state(self, A, B, mu_t, u_t):
         return A @ mu_t + B @ u_t
 
-    def predict_covariance(self, A, V, Q, init=False):
+    def predict_covariance(self, A, V, Q):
         return A @ V @ A.T + Q
 
-    def filter(self, likelihood=False):
+    def project(self, n):
+        y_preds = np.zeros((self.observations_size, 1, n))
+        last_observed_t = self.n_observations() -1
+        (mu_t, V_t) = self.state(last_observed_t)
+        for t in range(n):
+            (A, B, C, D, Q, R) = self.parameters(last_observed_t)
+            (y_pred, mu_t) = self.predict(A, B, C, D, mu_t, np.zeros((self.state_size, 1)))
+            y_preds[:, :, t] = self.predict_observable(C, D, mu_t, np.zeros((self.state_size, 1)))
+        return y_preds
+
+    def filter(self, likelihood=False, calculate_backwards_inital=False):
         """
         Filter values from observed data points.
         :param likelihood:
         :return: y_t, online predictions, updated mu's
         """
         # Initial values
-        ll_sum = 0
+        ll_hist = []
         T = self.n_observations()
         y_pred_online = np.zeros((self.observations_size, 1, T))
+        final_gain_partial = None
 
         # Kalman Filter and update over all observations t in 0..T
         for t in range(T):
@@ -95,9 +275,17 @@ class KalmanFilter(LDS):
             ll = self.update(t, mu_pred, V_pred, y_t, y_pred, likelihood)
 
             if likelihood:
-                ll_sum += ll
+                ll_hist.append(ll)
 
-        return y_pred_online, ll_sum
+            if calculate_backwards_inital and t == T-1:
+                # Occurs after update, for V_tm1 given 1..t-1
+                (mu_tm1_new, V_tm1_new) = self.state(t-1)
+                S = C @ V_pred @ C.T + R
+                K = V_pred @ C.T @ pinv(S)
+                (A, B, C, D, Q, R) = self.parameters(t - 1)
+                final_gain_partial = V_tm1_new - K @ C @ A @ V_tm1_new
+
+        return y_pred_online, ll_hist, final_gain_partial
 
     def update(self, t, mu_pred, V_pred, y_t, y_pred, compute_likelihood=False):
         (A, B, C, D, Q, R) = self.parameters(t - 1)
@@ -110,7 +298,7 @@ class KalmanFilter(LDS):
         K = V_pred @ C.T @ pinv(S)
 
         mu_new = mu_pred + K @ eps_tp1
-        V_new = (np.identity(self.state_size) - K @ C) @ V_pred
+        V_new = V_pred - K @ C @ V_pred
 
         likelihood = None
         if compute_likelihood:
@@ -124,39 +312,55 @@ class KalmanFilter(LDS):
     def smooth_filter(self, likelihood=False):
         # Time arguments
         init_t = self.init_t
-        final_t = self.ys.shape[Axis.time] - 1
+        n = self.n_observations()
 
-        (y_pred_online, ll_sum) = self.filter(likelihood)
-        V_smooth_tp1_ts = np.empty(self.Vs[:, :, 1:].shape)
+        (y_pred_online, ll_hist, backwards_smooth_inital) = self.filter(likelihood, calculate_backwards_inital=True)
+        V_smooth_t_tm1s = np.empty(self.Vs[:, :, 1:].shape)
 
-        # Start smoothing from t+1 given t
-        for t in range(final_t - 1, init_t, -1):
+        # Start smoothing from t+1 given t. Also change indexed for tm1+1 = j, see backwards algorithm for explanation
+        J_t = None
+        V_smooth_t_tm1 = backwards_smooth_inital
+        for t in range(n - 1, init_t, -1):
             u_t = self.us[:, :, t]
-            mu_pred_tp1, V_pred_tp1 = self.state(t + 1)
-            mu_pred_t, V_pred_t = self.state(t)
-            V_smooth_tp1_ts[:, :, t] = self.smooth_update(t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred_t, V_pred_t)
+            (mu_t, V_t) = self.state(t)
+            (mu_tm1, V_tm1) = self.state(t-1)
+            (V_smooth_t_tm1, J_tm1) = self.smooth_update(t, u_t, mu_t, V_t, mu_tm1, V_tm1, J_t, V_smooth_t_tm1)
 
-        return y_pred_online, ll_sum, V_smooth_tp1_ts
+            # Only n-1 smoothed values, so there are n-1 pairs
+            V_smooth_t_tm1s[:, :, t-1] = V_smooth_t_tm1
+            # iterate over index for Js
+            J_t = J_tm1
 
-    # Given prediction t+1, smooth prediction at t
-    def smooth_update(self, t, u_t, mu_pred_tp1, V_pred_tp1, mu_pred, V_pred):
-        (A, B, C, D, Q, R) = self.parameters(t)
+        return y_pred_online, ll_hist, V_smooth_t_tm1s
 
-        # E[E[t| t+1, ys]] and Cov(t+1| t (prediction))
-        mu_pred_tp1_t = self.predict_state(A, B, mu_pred, u_t)
-        V_pred_tp1_t = self.predict_covariance(A, V_pred, Q)
+    # Backwards algorithm, smooth mu and Vs
+    def smooth_update(self, t, u_t, mu_t, V_t, mu_tm1, V_tm1, J_t, V_t_tm1_given_T):
+        (A, B, C, D, Q, R) = self.parameters(t-1)
+
+        n = self.n_observations()
+
+        # E[mu_t, mu_tm1 | y1..t]
+        mu_t_tm1 = self.predict_state(A, B, mu_tm1, u_t)
+        V_t_tm1 = self.predict_covariance(A, V_tm1, Q)
 
         # Smoothed Gain matrix
-        J = V_pred @ A.T @ pinv(V_pred_tp1_t)
+        J_tm1 = V_tm1 @ A.T @ pinv(V_t_tm1)
 
-        # Smooth E[t| t+1] and Cov(t| t+1)
-        mu_smooth = mu_pred + J @ (mu_pred_tp1 - mu_pred_tp1_t)
-        V_smooth = V_pred + J @ (V_pred_tp1 - V_pred_tp1_t)
-        V_smooth_tp1_t = J @ V_pred_tp1
+        # Smooth E[t-1 | t..T ] and Cov(t-1 | t..T)
+        mu_smooth = mu_tm1 + J_tm1 @ (mu_t - mu_t_tm1)
+        V_smooth = V_tm1 + J_tm1 @ (V_t - V_t_tm1) @ J_tm1.T
 
-        self.update_state(t, mu_smooth, V_smooth)
+        # Delay computation so that t given tm1 is the same when t = T. The rest is computing the
+        # (t, tm1) = (T-1, T-2) onwards, pairs
+        if t < n-1:
+            V_smooth_t_tm1 = V_t @ J_tm1.T + J_t @ (V_t_tm1_given_T.T - A @ V_t) @ J_tm1.T
+        else:
+            # Delayed computation
+            V_smooth_t_tm1 = V_t_tm1_given_T
 
-        return V_smooth_tp1_t
+        self.update_state(t-1, mu_smooth, V_smooth)
+
+        return V_smooth_t_tm1, J_tm1
 
     def parameters(self, t):
         """
@@ -219,6 +423,12 @@ class KalmanFilter(LDS):
         self.Rs = np.insert(self.Rs, t + 1, R_t, axis=2)
 
     def update_state(self, t, mu_t, V_t):
+
+        if t + 1 < self.mus.shape[Axis.time]:
+            self.mus[:, :, t+1] = mu_t
+            self.Vs[:, :, t+1] = V_t
+            return
+
         self.mus = np.insert(self.mus, t + 1, mu_t, axis=2)
         self.Vs = np.insert(self.Vs, t + 1, V_t, axis=2)
 
@@ -242,37 +452,83 @@ class KalmanFilter(LDS):
     def n_observations(self):
         return self.ys.shape[Axis.time]
 
-    # Fitting functions:
-    @staticmethod
-    def __init_fit__(ys, state_size):
-        (r, c, t) = ys.shape
-        ys = ys.reshape((r, t)).T
+    """
+    Disk Cache Functions
+    """
+    @classmethod
+    def restore(cls, from_file, cache_dir=utils.get_default_cache_dir()):
+        cached = [f for f in os.listdir(cache_dir) if str(f) == from_file]
+        if not cached:
+            raise Exception("Kalman Filter: Could not restore {from_file} from {dir}".format(from_file=from_file, dir=cache_dir))
 
-        # Initialize A as identity + some noise
-        A = np.identity(state_size) + 0.1*np.random.random(state_size)
-        B = np.zeros((state_size,state_size))
+        kf_json_file = os.path.join(cache_dir, cached.pop(0))
+        (init_params, init_mu, init_V, fixed_params) = json_to_params(kf_json_file)
+        return cls(init_params, init_mu, init_V, fixed=fixed_params)
 
-        decomposition = PCA(n_components=r)
-        decomposition.fit(ys)
-        C = decomposition.explained_variance_ratio_.reshape((r, c))
-        D = np.zeros(C.shape)
+    def cache(self, id, features, description, cache_dir=utils.get_default_cache_dir()):
+        cached = [f for f in os.listdir(cache_dir) if str(f).replace(CACHE_EXT, "") == id]
+        if cached:
+            raise Exception("Kalman Filter: Could not cache {id} in {dir}, because it already exists!"
+                            .format(id=id, dir=cache_dir))
 
-        # Variance
-        Q = decomposition.get_covariance()
-        obs_var = np.var(ys, axis=1)
-        R = np.diag(obs_var)
+        filename = id + CACHE_EXT
+        features_str = ",".join(features)
+        fixed_params = self.fixed_params
+        observation_size = self.observations_size
+        state_size = self.state_size
+        A = matrix_to_str(self.As[:, :, 0])
+        B = matrix_to_str(self.Bs[:, :, 0])
+        C = matrix_to_str(self.Cs[:, :, 0])
+        D = matrix_to_str(self.Ds[:, :, 0])
+        Q = matrix_to_str(self.Qs[:, :, 0])
+        R = matrix_to_str(self.Rs[:, :, 0])
 
-        # Initial State
-        # TODO Work out PCA initial values
-        init_mu = np.zeros((state_size, 1))
-        init_V = np.zeros((state_size, state_size))
+        mu = matrix_to_str(self.mus[:, :, 0])
+        V = matrix_to_str(self.Vs[:, :, 0])
 
-        return  (A, B, C, D, Q, R), init_mu, init_V
+        data = OrderedDict([("name", id), ("description", description), ("features", features_str),
+                            ("fixed params", fixed_params), ("observation size", observation_size),
+                            ("state size", state_size), ("A", A), ("B", B), ("C", C), ("D", D), ("Q", Q), ("R", R),
+                            ("mu", mu), ("V", V)])
 
-    def __estep__(self, ys, us, init_params, init_mu, init_V):
-        pass
+        with open(os.path.join(cache_dir, filename), 'w') as f:
+            json.dump(data, f)
+            f.close()
 
-    def __mstep__(self):
-        pass
 
-#def lagged_model()
+# TODO Allow for time cached values
+def json_to_params(kf_json_file):
+    with open(kf_json_file, 'r') as f:
+        kalman_dict = json.load(f)
+        obs_size = int(kalman_dict['observation size'])
+        state_size = int(kalman_dict['state size'])
+        A = get_matrix(kalman_dict['A'], state_size, state_size)
+        B = get_matrix(kalman_dict['B'], state_size, state_size)
+        C = get_matrix(kalman_dict['C'], obs_size, state_size)
+        D = get_matrix(kalman_dict['D'], obs_size, state_size)
+        Q = get_matrix(kalman_dict['Q'], state_size, state_size)
+        R = get_matrix(kalman_dict['R'], obs_size, obs_size)
+
+        mu = get_matrix(kalman_dict['mu'], state_size, 1)
+        V = get_matrix(kalman_dict['V'], state_size, state_size)
+
+        fixed_params = bool(kalman_dict['fixed params'])
+
+        f.close()
+    return (A, B, C, D, Q, R), mu, V, fixed_params
+
+
+def get_matrix(matrix_str, rs, cs):
+    return np.fromstring(matrix_str, sep=' ').reshape((rs, cs))
+
+
+def matrix_to_str(matrix):
+    return np.array2string(matrix).replace('[', "").replace(']', "")
+
+
+def gauss(m, n):
+    return np.array([[np.random.standard_normal() for c in range(n)] for r in range(m)])
+
+
+def uniform(m, n):
+    return np.array([[np.random.uniform(0, 1) for c in range(n)] for r in range(m)])
