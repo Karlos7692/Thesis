@@ -22,8 +22,8 @@ class Model(metaclass=ABCMeta):
 class LDS(Model):
     init_t = -1
 
-    @abstractmethod
-    def fit(self, observations, conditional_inputs):
+    @classmethod
+    def fit(cls, ys, us, initial_kalman_params, iters=5, use_last_to_init=False, debug_limit=10):
         pass
 
     @abstractmethod
