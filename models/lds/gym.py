@@ -15,9 +15,9 @@ class LDSGym(Gym):
     def __init__(self, lds_class):
         self.lds_class = lds_class
 
-    def __generate_model_params__(self, obs_size, n_latent, snf=0.01, onf=0.0001):
+    def __generate_model_params__(self, obs_size, n_latent, snf=0.001):
         state_size = obs_size + n_latent
-        A = np.array([[1 if c==r or c==r+1 else 0 for c in range(state_size)] for r in range(state_size)])
+        A = np.array([[0.98 if c==r or c==r+1 else 0 for c in range(state_size)] for r in range(state_size)])
         A = A + A * snf * gauss(state_size, state_size)
         B = np.eye(state_size, state_size)
         C = np.eye(obs_size, state_size)
@@ -32,6 +32,7 @@ class LDSGym(Gym):
         ob = ys[:, :, 0]
         latent = np.zeros((n_latent, 1))
         init_mu = np.vstack((ob, latent))
+        init_mu[-1, :] = 0.1
         init_V = np.eye(state_size, state_size)
 
         return init_mu, init_V
@@ -43,7 +44,8 @@ class LDSGym(Gym):
         except:
             return (None, None)
 
-    def select_best_model(self, ys, us, iters=5, min_fit=30, n_models=100):
+    def select_best_model(self, ys, us, iters=5, min_fit=30, n_models=100, run_title=None):
+        run_title = " for {run}".format(run=run_title) or ""
 
         if ys.shape[Axis.time] < min_fit:
             raise ValueError("Oops, there is not enough data to even do a min fit.")
@@ -55,7 +57,7 @@ class LDSGym(Gym):
         # Make the max mse equal to the max possible se_total/observations so that invalid models arent checked
         best_mse = sys.float_info.max / float(ys.shape[Axis.time] - min_fit)
         best_model = None
-        print("Running models...")
+        print("Running models{run_msg}...".format(run_msg=run_title))
         for m_index in range(n_models):
             se_total = 0
             print("Running model {i}...".format(i=m_index))
