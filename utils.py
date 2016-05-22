@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 
 ROOT = os.path.dirname(__file__)
 RESOURCES = os.path.join(ROOT, "resources")
@@ -18,6 +19,15 @@ def get_default_cache_dir():
     return os.path.join(ROOT, CACHE_DIR)
 
 
-def date_str(date):
-    format = '%d.%m.%Y'
+def pretty_date_str(date):
+    format = '%d/%m/%Y'
     return pd.to_datetime(str(date)).strftime(format)
+
+
+def date_file_str(date):
+    format = '%d%m%Y'
+    return pd.to_datetime(str(date)).strftime(format)
+
+
+def arr11_str(d1xd1_array):
+    return np.array2string(d1xd1_array).replace("[", "").replace("]", "")

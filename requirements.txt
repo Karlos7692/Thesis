@@ -1,0 +1,6 @@
+dateutil
+numpy
+pandas
+sklearn
+scipy
+matplotlib
