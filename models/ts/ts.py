@@ -31,7 +31,6 @@ class TimeSeries(Model):
         # Residual Calculation
         eps_t = y_t - y_pred
         m.resid = np.insert(m.resid, n_obs, eps_t, axis=0)
-
         # Add data point
         self.model_info.endog = np.insert(self.model_info.endog, n_obs, y_t, axis=0)
 
@@ -44,9 +43,9 @@ class ARMA(TimeSeries):
         super().__init__(model_info, fitted_model)
 
     @classmethod
-    def fit(cls, data, order):
+    def fit(cls, data, order, method='css-mle'):
         arma = sm.tsa.ARMA(data, order)
-        fitted_results = arma.fit(disp=0)
+        fitted_results = arma.fit(disp=0, method=method)
         return cls(arma, fitted_results)
 
     def predict(self):
