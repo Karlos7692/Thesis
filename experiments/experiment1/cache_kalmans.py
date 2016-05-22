@@ -31,11 +31,11 @@ def log(log_file, msg):
         f.close()
 
 START_DATE = datetime.strptime('20060307', '%Y%m%d')
-DELTA_YEAR = relativedelta(years=1)
-N_YEARS = 10
-KEY_DATES = [START_DATE + k * DELTA_YEAR for k in range(0, N_YEARS+1)]
+DELTA_SAN = relativedelta(months=6)
+N_SAN = 10 * 2
+KEY_DATES = [START_DATE + k * DELTA_SAN for k in range(0, N_SAN + 1)]
 
-CACHE_DIR = os.path.join(os.getcwd(), "..", "..", "cache/exp1-r1")
+CACHE_DIR = os.path.join(os.getcwd(), "..", "..", "cache/exp1")
 RESULTS_DIR = os.path.join(os.getcwd(), "results")
 LOG_FILE = os.path.join(os.getcwd(), "experiment1.log")
 
@@ -52,11 +52,10 @@ test_start_dates = KEY_DATES[1:-1]
 test_end_dates = KEY_DATES[2:]
 n_periods = len(test_end_dates)
 
-ARMA_ORDER = (1, 0)
-ARMA_NAME = 'ARMA({p},{q})'.format(p=ARMA_ORDER[0], q=ARMA_ORDER[1])
+N_LATENT = 3
 
-# Define 1 period as a year.
-for stock in STOCKS:
+# Define a period as 6 months.
+for stock in STOCKS[:7]:
     data_manager = CommsecDataManager(stock, SELECTION, AS_TYPES, WITH_NAMES)
     # Split into training sets and test sets for each period
     for period in range(n_periods):
@@ -76,8 +75,8 @@ for stock in STOCKS:
 
         # Kalman Filter Management
         # Kalman Filter control input, Also we can choose the number of latent variables
-        training_us = np.zeros((4, 1, training_ys.shape[2]))
-        test_us = np.zeros((4, 1, test_ys.shape[2]))
+        training_us = np.zeros((1 + N_LATENT, 1, training_ys.shape[2]))
+        test_us = np.zeros((1 + N_LATENT, 1, test_ys.shape[2]))
 
         # Train Kalman Filter
         n_obs = training_ys.shape[2]
@@ -103,10 +102,15 @@ for stock in STOCKS:
 
             # Train a new kalman filter and cache it
             kf = None
-            for n_its in range(6, 0, -1):
-                kf = kalman_gym.select_best_model(training_ys, training_us, iters=n_its, min_fit=n_obs - 25, n_models=25)
+            for n_its in range(8, 0, -1):
+                run_title = "{stock} from period {start} - {finish} with {n_its} EM iterations"\
+                    .format(stock=stock, start=utils.pretty_date_str(training_start_dates[period]),
+                            finish=utils.pretty_date_str(test_start_dates[period]), n_its=n_its)
+                kf = kalman_gym.select_best_model(training_ys, training_us, iters=n_its, min_fit=n_obs - 10,
+                                                  n_models=25, run_title=run_title)
                 if kf is not None:
                     break
+
             if kf is None:
                 raise Exception("Could not fit an LDS")
 
@@ -114,45 +118,3 @@ for stock in STOCKS:
                                                            test_start_dates[period], True)
             kf.cache(kf_cache_name, data_manager.features(), "Kalman filter (Best Model) trained from {start}-{end}"
                      .format(start=training_start_dates[period], end=test_start_dates[period]), cache_dir=CACHE_DIR)
-
-        # Double check stability.
-        kf.ys = test_ys
-        kf.us = test_us
-
-        (kf_pred, ll_hist, _) = kf.filter()
-
-        # # TODO Cache ARMA so we dont have to worry about training it.
-        # # TODO Manage ARMA models, choosing best model for data
-        # # Arma Management
-        # try:
-        #     arma = ARMA.fit(training_ys.flatten(), ARMA_ORDER)
-        # except:
-        #     log_msg = "Test {stock} {start}-{end} canceled, ARMA failed to fit. We should come back to this later"\
-        #                 .format(stock=stock, start=utils.pretty_date_str(test_dates.values[0]),
-        #                 end=utils.pretty_date_str(test_dates.values[-1]))
-        #     log(LOG_FILE, log_msg)
-        #     print('ARMA failed to fit this period, Did not run test')
-        #
-        #     continue
-        #
-        # arma_preds = np.zeros(test_ys.shape)
-        # for t in range(test_ys.shape[2]):
-        #     arma_preds[:, :, t] = arma.predict()
-        #     arma.update(test_ys[:, :, t], arma_preds[:, :, t])
-
-
-        # # Results Section:
-        # test_results_filename = 'experiment_results.csv'
-        # gw = GraphWriter(stock, output_dir=RESULTS_DIR)
-        # gw.residuals_plot('Kalman Filter', ml.calculate_residuals(test_ys, kf_pred).flatten(), test_dates.values)
-        # gw.residuals_plot(ARMA_NAME, ml.calculate_residuals(test_ys, arma_preds).flatten(), test_dates.values)
-        # gw.comparison_plot(test_dates.values, 'Kalman Filter', kf_pred.flatten(), ARMA_NAME, arma_preds.flatten(),
-        #                    'Next Day Price', test_ys)
-        # rw = CSVReportWriter(test_results_filename, output_dir=RESULTS_DIR)
-        # rw.render(utils.pretty_date_str(test_dates.values[0]), utils.pretty_date_str(test_dates.values[-1]), stock, ARMA_NAME,
-        #   utils.arr11_str(ml.aae(test_ys, arma_preds)), utils.arr11_str(ml.rmse(test_ys, arma_preds)),
-        #   utils.arr11_str(ml.mape(test_ys, arma_preds)), utils.arr11_str(ml.mpse(test_ys, arma_preds)))
-        #
-        # rw.render(utils.pretty_date_str(test_dates.values[0]), utils.pretty_date_str(test_dates.values[-1]), stock, 'Kalman Filter',
-        #           utils.arr11_str(ml.aae(test_ys, kf_pred)), utils.arr11_str(ml.rmse(test_ys, kf_pred)),
-        #           utils.arr11_str(ml.mape(test_ys, kf_pred)), utils.arr11_str(ml.mpse(test_ys, kf_pred)))
